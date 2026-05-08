@@ -7,6 +7,48 @@
 declare(strict_types=1);
 
 // ============================================================
+// SESSION & AUTHENTICATION MIDDLEWARE
+// ============================================================
+
+/**
+ * Start session if not already started
+ */
+function start_session(): void
+{
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
+    }
+}
+
+/**
+ * Require user to be authenticated
+ */
+function requireAuth(): void
+{
+    start_session();
+    
+    if (!isset($_SESSION['user_id']) || !isset($_SESSION['logged_in'])) {
+        redirect('/login');
+    }
+}
+
+/**
+ * Require specific role(s) - accepts multiple roles
+ */
+function requireRole(...$roles): void
+{
+    start_session();
+    requireAuth();
+    
+    $user_role = $_SESSION['role'] ?? null;
+    
+    if (!in_array($user_role, $roles, true)) {
+        http_response_code(403);
+        exit('Access Denied. Insufficient permissions.');
+    }
+}
+
+// ============================================================
 // VALIDATION & SANITIZATION
 // ============================================================
 
@@ -593,7 +635,7 @@ function is_in_stock(int $product_id): bool
 }
 
 // ============================================================
-// QR CODE & SESSION HELPERS
+// QR CODE & FLASH MESSAGE HELPERS
 // ============================================================
 
 /**
@@ -610,25 +652,23 @@ function get_qr_code(string $token): ?array
 }
 
 /**
- * Start session if not already started
- */
-function start_session(): void
-{
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-}
-
-/**
  * Set session flash message
  */
 function set_flash(string $type, string $message): void
 {
     start_session();
     $_SESSION['flash'] = [
-        'type'    => $type, // 'success', 'error', 'info', 'warning'
+        'type'    => $type,
         'message' => $message,
     ];
+}
+
+/**
+ * camelCase alias for set_flash()
+ */
+function setFlash(string $type, string $message): void
+{
+    set_flash($type, $message);
 }
 
 /**
@@ -656,6 +696,39 @@ function destroy_session(): void
     start_session();
     session_destroy();
     $_SESSION = [];
+}
+
+// ============================================================
+// RESPONSE HELPERS
+// ============================================================
+
+/**
+ * Return JSON response with status code
+ */
+function jsonResponse(array $data, int $status_code = 200): void
+{
+    http_response_code($status_code);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data);
+    exit;
+}
+
+/**
+ * Redirect to URL
+ */
+function redirect(string $url): void
+{
+    header("Location: $url");
+    exit;
+}
+
+/**
+ * Redirect with flash message
+ */
+function redirect_with_message(string $url, string $type, string $message): void
+{
+    set_flash($type, $message);
+    redirect($url);
 }
 
 // ============================================================
@@ -688,36 +761,19 @@ function is_ajax(): bool
 }
 
 /**
- * Redirect to URL
- */
-function redirect(string $url): void
-{
-    header("Location: $url");
-    exit;
-}
-
-/**
- * Redirect with flash message
- */
-function redirect_with_message(string $url, string $type, string $message): void
-{
-    set_flash($type, $message);
-    redirect($url);
-}
-
-/**
  * Log message to file
  */
 function log_message(string $message, string $level = 'INFO'): void
 {
     $timestamp = date('Y-m-d H:i:s');
-    $log_file = __DIR__ . '/../logs/app.log';
+    $log_dir = __DIR__ . '/../logs';
     
     // Create logs directory if it doesn't exist
-    if (!is_dir(dirname($log_file))) {
-        mkdir(dirname($log_file), 0755, true);
+    if (!is_dir($log_dir)) {
+        mkdir($log_dir, 0755, true);
     }
     
+    $log_file = $log_dir . '/app.log';
     $log_entry = "[$timestamp] [$level] $message" . PHP_EOL;
     file_put_contents($log_file, $log_entry, FILE_APPEND);
 }
